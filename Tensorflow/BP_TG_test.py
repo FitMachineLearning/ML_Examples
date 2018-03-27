@@ -109,9 +109,13 @@ def Qmodel(X, w_h, w_o):
     h = tf.nn.relu(tf.matmul(X, w_h)) # this is a basic mlp, think 2 stacked logistic regressions
     return tf.matmul(h, w_o) # note that we dont take the softmax at the end because our cost fn does that for us
 
+def apModel(X, apw_h, apw_o):
+    h = tf.nn.relu(tf.matmul(X, apw_h)) # this is a basic mlp, think 2 stacked logistic regressions
+    return tf.matmul(h, apw_o) # note that we dont take the softmax at the end because our cost fn does that for us
+
 ''' QModel '''
-Qw_h = init_weights([dataX.shape[1], 625]) # create symbolic variables
-Qw_o = init_weights([625, dataY.shape[1]])
+Qw_h = init_weights([num_env_variables+num_env_actions, 625]) # create symbolic variables
+Qw_o = init_weights([625, 1])
 
 Qpy_x = Qmodel(dataX, Qw_h, Qw_o)
 
@@ -119,18 +123,18 @@ Qcost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(dataY, Qpy_x))))
 Qtrain_op = tf.train.AdadeltaOptimizer(1).minimize(Qcost)
 
 ''' apModel '''
-apw_h = init_weights([apdataX.shape[1], 625]) # create symbolic variables
-apw_o = init_weights([625, apdataY.shape[1]])
+apw_h = init_weights([num_env_variables, 625]) # create symbolic variables
+apw_o = init_weights([625, num_env_actions])
 
-appy_x = apMmodel(apdataX, apw_h, apw_o)
+appy_x = apModel(apdataX, apw_h, apw_o)
 
-apcost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataX, appy_x))))
+apcost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataY, appy_x))))
 aptrain_op = tf.train.AdadeltaOptimizer(1).minimize(apcost)
 
 
 
 
-'''
+''' AP & NOISY MODEL
 #initialize the action predictor model
 action_predictor_model = Sequential()
 #model.add(Dense(num_env_variables+num_env_actions, activation='tanh', input_dim=dataX.shape[1]))
@@ -148,7 +152,7 @@ action_predictor_model.add(Dense(apdataY.shape[1]))
 opt2 = optimizers.Adadelta()
 
 action_predictor_model.compile(loss='mse', optimizer=opt2, metrics=['accuracy'])
-'''
+
 
 #initialize the action predictor model
 noisy_model = Sequential()
@@ -161,19 +165,23 @@ noisy_model.add(Dense(apdataY.shape[1]))
 opt3 = optimizers.Adadelta()
 
 noisy_model.compile(loss='mse', optimizer=opt3, metrics=['accuracy'])
-
+'''
 
 ''' naModel '''
-naw_h = init_weights([apdataX.shape[1], 625]) # create symbolic variables
-naw_o = init_weights([625, apdataY.shape[1]])
+naw_h = init_weights([num_env_variables, 625]) # create symbolic variables
+naw_o = init_weights([625, num_env_actions])
 
-napy_x = apMmodel(apdataX, apw_h, apw_o)
+napy_x = apModel(apdataX, apw_h, apw_o)
 
-nacost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataX, napy_x))))
+nacost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataY, napy_x))))
 natrain_op = tf.train.AdadeltaOptimizer(1).minimize(nacost)
 
 
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
 
+
+''' LOAD MODEL
 #load previous model weights if they exist
 if load_previous_weights:
     dir_path = os.path.realpath(".")
@@ -195,7 +203,7 @@ if load_previous_weights:
         action_predictor_model.load_weights(apWeights_filename)
     else:
         print("File ",apWeights_filename," does not exis. Retraining... ")
-
+'''
 
 memorySA = np.zeros(shape=(1,num_env_variables+num_env_actions))
 memoryS = np.zeros(shape=(1,num_env_variables))
@@ -313,7 +321,9 @@ def predictTotalRewards(qstate, action):
     predX[0] = qs_a
 
     #print("trying to predict reward at qs_a", predX[0])
-    pred = Qmodel.predict(predX[0].reshape(1,predX.shape[1]))
+    #pred = Qmodel.predict(predX[0].reshape(1,predX.shape[1]))
+    inputVal = predX[0].reshape(1,predX.shape[1])
+    pred = sess.run(Qpy_x, feed_dict={dataX: inputVal})
     remembered_total_reward = pred[0][0]
     return remembered_total_reward
 
@@ -322,7 +332,10 @@ def GetRememberedOptimalPolicy(qstate):
     predX[0] = qstate
 
     #print("trying to predict reward at qs_a", predX[0])
-    pred = action_predictor_model.predict(predX[0].reshape(1,predX.shape[1]))
+    #pred = action_predictor_model.predict(predX[0].reshape(1,predX.shape[1]))
+
+    inputVal = predX[0].reshape(1,predX.shape[1])
+    pred = sess.run(appy_x, feed_dict={apdataX: inputVal})
     r_remembered_optimal_policy = pred[0]
     return r_remembered_optimal_policy
 
@@ -331,7 +344,10 @@ def GetRememberedOptimalPolicyFromNoisyModel(targetModel,qstate):
     predX[0] = qstate
 
     #print("trying to predict reward at qs_a", predX[0])
-    pred = targetModel.predict(predX[0].reshape(1,predX.shape[1]))
+    #pred = targetModel.predict(predX[0].reshape(1,predX.shape[1]))
+    inputVal = predX[0].reshape(1,predX.shape[1])
+    pred = sess.run(napy_x, feed_dict={apdataX: inputVal})
+
     r_remembered_optimal_policy = pred[0]
     return r_remembered_optimal_policy
 
@@ -364,7 +380,7 @@ def scale_weights(memR,memW):
     return memW
 
 
-def pr_actor_experience_replay(memSA,memR,memS,memA,memW,num_epochs=1):
+def pr_actor_experience_replay(memSA,memR,memS,memA,memW,num_epoch=1):
     tSA = (memSA)
     tR = (memR)
     tX = (memS)
@@ -392,12 +408,15 @@ def pr_actor_experience_replay(memSA,memR,memS,memA,memW,num_epochs=1):
     tY_train = tY_train[1:]
     print("%8d were better After removing first element"%np.alen(tX_train))
     if np.alen(tX_train)>0:
-        action_predictor_model.fit(tX_train,tY_train, batch_size=mini_batch, nb_epoch=num_epochs,verbose=0)
+        #action_predictor_model.fit(tX_train,tY_train, batch_size=mini_batch, nb_epoch=num_epochs,verbose=0)
+        for num_epoch in range(training_epochs):
+            sess.run(aptrain_op, feed_dict={apdataX: tX_train, apdataY: tY_train},batch_size=mini_batch)
 
 
 
 
-def actor_experience_replay(memSA,memR,memS,memA,memW,num_epochs=1):
+
+def actor_experience_replay(memSA,memR,memS,memA,memW,num_epoch=1):
     tSA = (memSA)
     tR = (memR)
     tX = (memS)
@@ -472,7 +491,9 @@ def actor_experience_replay(memSA,memR,memS,memA,memW,num_epochs=1):
         #tW = scale_weights(tR,tW)
         #print("# setps short listed ", np.alen(tR))
 
-        action_predictor_model.fit(tX_train,tY_train, batch_size=mini_batch, nb_epoch=num_epochs,verbose=0)
+        #action_predictor_model.fit(tX_train,tY_train, batch_size=mini_batch, nb_epoch=num_epochs,verbose=0)
+        for num_epoch in range(training_epochs):
+            sess.run(aptrain_op, feed_dict={apdataX: tX_train, apdataY: tY_train},batch_size=mini_batch)
 
 
 
@@ -486,7 +507,10 @@ def train_noisy_actor():
     tY = tY[train_A,:]
     tW = tW[train_A,:]
 
-    noisy_model.fit(tX,tY, batch_size=mini_batch, nb_epoch=training_epochs,verbose=0)
+    #noisy_model.fit(tX,tY, batch_size=mini_batch, nb_epoch=training_epochs,verbose=0)
+    for num_epoch in range(training_epochs):
+        sess.run(natrain_op, feed_dict={apdataX: tX, apdataY: tY},num_epochs=training_epochs,batch_size=mini_batch)
+
 
 
 def add_controlled_noise(targetModel,largeNoise = False):
@@ -748,13 +772,15 @@ for game in range(num_games_to_play):
                 tR = tR[train_A,:]
                 tSA = tSA    [train_A,:]
                 print("Training Critic n elements =", np.alen(tR))
-                Qmodel.fit(tSA,tR, batch_size=mini_batch, nb_epoch=training_epochs,verbose=0)
+                sess.run(Qtrain_op, feed_dict={dataX: tSA, dataY: tR},num_epochs=num_epoch,batch_size=mini_batch)
+
+                #Qmodel.fit(tSA,tR, batch_size=mini_batch, nb_epoch=training_epochs,verbose=0)
             if game > 3 and game %5 ==-1 and uses_parameter_noising:
                 print("Training noisy_actor")
                 train_noisy_actor()
                 #Reinforce training with best game
 
-
+        ''' SAVE MODEL
         if done and game >= num_initial_observation and not PLAY_GAME:
             if save_weights and game%20 == 0 and game >35:
                 #Save model
@@ -770,7 +796,7 @@ for game in range(num_games_to_play):
                 np.save(version_name+'memoryR.npy',memoryR)
                 np.save(version_name+'memoryW.npy',memoryW)
 
-
+        '''
 
 
         if done:
