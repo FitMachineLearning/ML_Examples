@@ -109,29 +109,28 @@ def Qmodel(X, w_h, w_o):
     h = tf.nn.relu(tf.matmul(X, w_h)) # this is a basic mlp, think 2 stacked logistic regressions
     return tf.matmul(h, w_o) # note that we dont take the softmax at the end because our cost fn does that for us
 
-'''
-#nitialize the Reward predictor model
-Qmodel = Sequential()
-Qmodel.add(Dense(64, activation='relu', input_dim=dataX.shape[1]))
-Qmodel.add(Dense(64, activation='relu'))
-Qmodel.add(Dense(64, activation='relu'))
-Qmodel.add(Dense(64, activation='relu'))
-Qmodel.add(Dense(dataY.shape[1]))
-#opt = optimizers.adadelta(lr=learning_rate)
-opt = optimizers.Adadelta()
-Qmodel.compile(loss='mse', optimizer=opt, metrics=['accuracy'])
-
+''' QModel '''
 Qw_h = init_weights([dataX.shape[1], 625]) # create symbolic variables
-Qw_o = init_weights([625, dataX.shape[1]])
-'''
+Qw_o = init_weights([625, dataY.shape[1]])
 
 Qpy_x = Qmodel(dataX, Qw_h, Qw_o)
 
 Qcost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(dataY, Qpy_x))))
 Qtrain_op = tf.train.AdadeltaOptimizer(1).minimize(Qcost)
 
+''' apModel '''
+apw_h = init_weights([apdataX.shape[1], 625]) # create symbolic variables
+apw_o = init_weights([625, apdataY.shape[1]])
+
+appy_x = apMmodel(apdataX, apw_h, apw_o)
+
+apcost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataX, appy_x))))
+aptrain_op = tf.train.AdadeltaOptimizer(1).minimize(apcost)
 
 
+
+
+'''
 #initialize the action predictor model
 action_predictor_model = Sequential()
 #model.add(Dense(num_env_variables+num_env_actions, activation='tanh', input_dim=dataX.shape[1]))
@@ -149,7 +148,7 @@ action_predictor_model.add(Dense(apdataY.shape[1]))
 opt2 = optimizers.Adadelta()
 
 action_predictor_model.compile(loss='mse', optimizer=opt2, metrics=['accuracy'])
-
+'''
 
 #initialize the action predictor model
 noisy_model = Sequential()
@@ -162,6 +161,18 @@ noisy_model.add(Dense(apdataY.shape[1]))
 opt3 = optimizers.Adadelta()
 
 noisy_model.compile(loss='mse', optimizer=opt3, metrics=['accuracy'])
+
+
+''' naModel '''
+naw_h = init_weights([apdataX.shape[1], 625]) # create symbolic variables
+naw_o = init_weights([625, apdataY.shape[1]])
+
+napy_x = apMmodel(apdataX, apw_h, apw_o)
+
+nacost = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(apdataX, napy_x))))
+natrain_op = tf.train.AdadeltaOptimizer(1).minimize(nacost)
+
+
 
 #load previous model weights if they exist
 if load_previous_weights:
