@@ -1,5 +1,3 @@
-#Initial Code Credit to nlintz
-
 import tensorflow as tf
 import numpy as np
 from tensorflow.examples.tutorials.mnist import input_data
@@ -34,8 +32,13 @@ with tf.Session() as sess:
     # you need to initialize all variables
     tf.global_variables_initializer().run()
 
-    for i in range(100):
+    for i in range(1):
         for start, end in zip(range(0, len(trX), 128), range(128, len(trX)+1, 128)):
             sess.run(train_op, feed_dict={X: trX[start:end], Y: trY[start:end]})
         print(i, np.mean(np.argmax(teY, axis=1) ==
                          sess.run(predict_op, feed_dict={X: teX})))
+
+    #predX = np.zeros(shape=(1,784))
+    predX = teX[0].reshape(1,784)
+    #predX[0] = teX[1]
+    print("pred of teX", sess.run(py_x, feed_dict={X: predX} ))
